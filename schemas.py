@@ -15,7 +15,6 @@ class UserCreate(UserBase):
 class UserUpdate(UserBase):
     username: str | None = Field(default=None, min_length=1, max_length=50)  # type: ignore[assignment]
     email: EmailStr | None = Field(default=None, max_length=120)  # type: ignore[assignment]
-    image_file: str | None = Field(default=None, min_length=1, max_length=255)
 
 
 class Token(BaseModel):
