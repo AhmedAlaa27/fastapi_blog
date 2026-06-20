@@ -43,6 +43,8 @@ class Post(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     title: Mapped[str] = mapped_column(String(100), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    # When adding a new column to an existing table, use server_default to set for all existing rows.
+    likes: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     user_id: Mapped[int] = mapped_column(
         ForeignKey("users.id"),
         nullable=False,

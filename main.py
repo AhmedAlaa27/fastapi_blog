@@ -14,7 +14,7 @@ import models
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-from database import Base, engine, get_db
+from database import engine, get_db
 
 from routers import posts, users
 from config import settings
@@ -23,10 +23,9 @@ from config import settings
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     # Startup
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    # async with engine.begin() as conn:
+    #     await conn.run_sync(Base.metadata.create_all)
     yield
-
     # Shutdown
     await engine.dispose()
 
