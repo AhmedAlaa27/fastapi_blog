@@ -5,10 +5,10 @@ from pathlib import Path
 import httpx
 from sqlalchemy import delete, select, update
 
-import models
-from database import AsyncSessionLocal, engine
-from image_utils import PROFILE_PICS_DIR
-from main import app
+from app import models
+from app.db.session import AsyncSessionLocal, engine
+from app.storage.local_storage import PROFILE_PICS_DIR
+from app.main import app
 
 POPULATE_IMAGES_DIR = Path("populate_images")
 

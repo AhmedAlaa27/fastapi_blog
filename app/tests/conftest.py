@@ -26,8 +26,9 @@ from moto import mock_aws
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from database import Base, get_db
-from main import app
+from app.db.base import Base
+from app.db.session import get_db
+from app.main import app
 
 pytest_plugins = ["anyio"]
 
