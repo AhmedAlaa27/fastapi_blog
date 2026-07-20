@@ -62,3 +62,31 @@ The FastAPI Blog Team
         plain_text=plain_text,
         html_content=html_content,
     )
+
+
+async def send_verification_email(to_email: str, username: str, token: str) -> None:
+    verify_url = f"{settings.frontend_url}/verify-email?token={token}"
+
+    template = templates.env.get_template("email/verify_email.html")
+    html_content = template.render(verify_url=verify_url, username=username)
+
+    plain_text = f"""Hi {username},
+
+Welcome to FastAPI Blog! Please verify your email address by clicking the link below:
+
+{verify_url}
+
+This link will expire in {settings.email_verification_token_expire_hours} hours.
+
+If you didn't create this account, you can safely ignore this email.
+
+Best regards,
+The FastAPI Blog Team
+"""
+
+    await send_email(
+        to_email=to_email,
+        subject="Verify Your Email - FastAPI Blog",
+        plain_text=plain_text,
+        html_content=html_content,
+    )

@@ -1,12 +1,22 @@
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.models import User
+from app.models.role import Role
 from app.repositories.base import BaseRepository
 
 
 class UserRepository(BaseRepository[User]):
     model = User
+
+    async def get_by_id_with_roles(self, db: AsyncSession, id_: int) -> User | None:
+        result = await db.execute(
+            select(User)
+            .where(User.id == id_)
+            .options(selectinload(User.roles).selectinload(Role.permissions)),
+        )
+        return result.scalars().first()
 
     async def get_by_email(self, db: AsyncSession, email: str) -> User | None:
         result = await db.execute(

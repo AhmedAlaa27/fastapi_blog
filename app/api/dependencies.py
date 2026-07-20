@@ -32,7 +32,7 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    user = await user_repository.get_by_id(db, user_id_int)
+    user = await user_repository.get_by_id_with_roles(db, user_id_int)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -43,3 +43,18 @@ async def get_current_user(
 
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
+
+
+def require_permission(permission: str):
+    async def checker(current_user: CurrentUser) -> User:
+        user_permissions = {
+            p.name for role in current_user.roles for p in role.permissions
+        }
+        if permission not in user_permissions:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not enough permissions",
+            )
+        return current_user
+
+    return checker

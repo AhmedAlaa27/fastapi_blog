@@ -68,6 +68,18 @@ async def create_post(db: AsyncSession, data: PostCreate, current_user: User) ->
     return new_post
 
 
+def _authorize_post_mutation(current_user: User, post: Post, permission: str) -> None:
+    is_owner = post.user_id == current_user.id
+    has_override = permission in {
+        p.name for role in current_user.roles for p in role.permissions
+    }
+    if not is_owner and not has_override:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to perform this action on this post",
+        )
+
+
 async def _get_owned_post(db: AsyncSession, post_id: int, current_user: User) -> Post:
     post = await post_repository.get_by_id(db, post_id)
     if not post:
@@ -75,11 +87,7 @@ async def _get_owned_post(db: AsyncSession, post_id: int, current_user: User) ->
             status_code=status.HTTP_404_NOT_FOUND, detail="Post not found"
         )
 
-    if post.user_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to update this post",
-        )
+    _authorize_post_mutation(current_user, post, "posts:update")
     return post
 
 
@@ -118,11 +126,7 @@ async def delete_post(db: AsyncSession, post_id: int, current_user: User) -> Non
             status_code=status.HTTP_404_NOT_FOUND, detail="Post not found"
         )
 
-    if post.user_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to delete this post",
-        )
+    _authorize_post_mutation(current_user, post, "posts:delete")
 
     await post_repository.delete(db, post)
     await db.commit()

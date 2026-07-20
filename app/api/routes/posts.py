@@ -3,7 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import CurrentUser
+from app.api.dependencies import CurrentUser, require_permission
 from app.core.config import settings
 from app.db.session import get_db
 from app.schemas.post import PaginatedPostsResponse, PostCreate, PostResponse, PostUpdate
@@ -25,6 +25,7 @@ async def get_posts(
     "",
     response_model=PostResponse,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_permission("posts:create"))],
 )
 async def create_post(
     post: PostCreate,

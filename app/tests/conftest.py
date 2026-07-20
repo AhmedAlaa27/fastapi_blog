@@ -26,11 +26,21 @@ from moto import mock_aws
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
+from sqlalchemy import select
+
 from app.db.base import Base
 from app.db.session import get_db
 from app.main import app
+from app.models import User
+from app.models.role import Permission, Role
 
 pytest_plugins = ["anyio"]
+
+PERMISSIONS = ["posts:create", "posts:update", "posts:delete"]
+ROLE_PERMISSIONS = {
+    "admin": ["posts:create", "posts:update", "posts:delete"],
+    "author": ["posts:create"],
+}
 
 
 @pytest.fixture(scope="session")
@@ -51,6 +61,19 @@ def test_engine():
 async def setup_database(test_engine):
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+    seed_session = async_sessionmaker(bind=test_engine, expire_on_commit=False)()
+    async with seed_session as session:
+        permissions = {name: Permission(name=name) for name in PERMISSIONS}
+        session.add_all(permissions.values())
+        for role_name, perm_names in ROLE_PERMISSIONS.items():
+            session.add(
+                Role(
+                    name=role_name,
+                    permissions=[permissions[name] for name in perm_names],
+                )
+            )
+        await session.commit()
 
     yield
 
@@ -114,6 +137,7 @@ async def client(
 
 async def create_test_user(
     client: AsyncClient,
+    db_session: AsyncSession,
     username: str = "testuser",
     email: str = "test@example.com",
     password: str = "testpassword123",
@@ -127,6 +151,14 @@ async def create_test_user(
         },
     )
     assert response.status_code == 201, f"Failed to create user: {response.text}"
+
+    # Registration requires email verification before login; tests bypass
+    # the email round-trip by flipping the flag directly.
+    result = await db_session.execute(select(User).where(User.email == email.lower()))
+    user = result.scalars().one()
+    user.email_verified = True
+    await db_session.commit()
+
     return response.json()
 
 

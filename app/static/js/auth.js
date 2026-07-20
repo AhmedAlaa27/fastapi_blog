@@ -30,6 +30,7 @@ export async function getCurrentUser() {
             }
 
             localStorage.removeItem("access_token");
+            localStorage.removeItem("refresh_token");
             return null;
         } catch (error) {
             console.error("Error fetching current user:", error);
@@ -42,8 +43,22 @@ export async function getCurrentUser() {
     return fetchPromise;
 }
 
-export function logout() {
+export async function logout() {
+    const refreshToken = localStorage.getItem("refresh_token");
+    if (refreshToken) {
+        try {
+            await fetch("/api/users/logout", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ refresh_token: refreshToken }),
+            });
+        } catch (error) {
+            console.error("Error revoking refresh token:", error);
+        }
+    }
+
     localStorage.removeItem("access_token");
+    localStorage.removeItem("refresh_token");
     currentUser = null;
     window.location.href = "/";
 }

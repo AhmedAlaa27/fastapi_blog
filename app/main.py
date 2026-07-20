@@ -12,11 +12,15 @@ from fastapi.exception_handlers import (
     request_validation_exception_handler,
 )
 
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.routes import auth, posts, users
 from app.core.config import settings
 from app.core.logging import setup_logging
+from app.core.rate_limit import limiter
 from app.db.session import engine, get_db
 from app.services import post_service, user_service
 
@@ -31,6 +35,10 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 app.mount("/media", StaticFiles(directory=BASE_DIR / "media"), name="media")
@@ -101,7 +109,7 @@ async def login_page(request: Request):
     return templates.TemplateResponse(
         request,
         "login.html",
-        {"title": "Login"},
+        {"title": "Login", "google_client_id": settings.google_client_id},
     )
 
 
