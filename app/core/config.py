@@ -33,5 +33,7 @@ class Settings(BaseSettings):
 
     google_client_id: str = ""
 
+    log_level: str = "INFO"
+
 
 settings = Settings()  # type: ignore[call-arg] # Loaded from .env

@@ -17,11 +17,15 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api import health
 from app.api.routes import auth, posts, users
 from app.core.config import settings
 from app.core.logging import setup_logging
 from app.core.rate_limit import limiter
 from app.db.session import engine, get_db
+from app.exceptions.base import AppException
+from app.exceptions.handlers import app_exception_handler
+from app.middleware.request_context import RequestContextMiddleware
 from app.services import post_service, user_service
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -29,7 +33,7 @@ BASE_DIR = Path(__file__).resolve().parent
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    setup_logging()
+    setup_logging(settings.log_level)
     yield
     await engine.dispose()
 
@@ -39,15 +43,17 @@ app = FastAPI(lifespan=lifespan)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
+app.add_middleware(RequestContextMiddleware)
 
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 app.mount("/media", StaticFiles(directory=BASE_DIR / "media"), name="media")
 
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
-app.include_router(auth.router, prefix="/api/users", tags=["auth"])
-app.include_router(users.router, prefix="/api/users", tags=["users"])
-app.include_router(posts.router, prefix="/api/posts", tags=["posts"])
+app.include_router(health.router, tags=["health"])
+app.include_router(auth.router, prefix="/api/v1/users", tags=["auth"])
+app.include_router(users.router, prefix="/api/v1/users", tags=["users"])
+app.include_router(posts.router, prefix="/api/v1/posts", tags=["posts"])
 
 
 @app.get("/", include_in_schema=False, name="home")
@@ -192,3 +198,7 @@ async def validation_exception_handler(
         },
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
     )
+
+
+### AppException Handler
+app.add_exception_handler(AppException, app_exception_handler)

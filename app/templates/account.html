@@ -286,7 +286,7 @@
 
         try {
             const response = await fetch(
-                `/api/users/${currentUserId}/picture`,
+                `/api/v1/users/${currentUserId}/picture`,
                 {
                     method: "PATCH",
                     headers: {
@@ -353,7 +353,7 @@
         const userData = Object.fromEntries(formData.entries());
 
         try {
-            const response = await fetch(`/api/users/${currentUserId}`, {
+            const response = await fetch(`/api/v1/users/${currentUserId}`, {
                 method: "PATCH",
                 headers: {
                     "Content-Type": "application/json",
@@ -416,7 +416,7 @@
             }
 
             try {
-                const response = await fetch(`/api/users/${currentUserId}`, {
+                const response = await fetch(`/api/v1/users/${currentUserId}`, {
                     method: "DELETE",
                     headers: {
                         Authorization: `Bearer ${token}`,
@@ -489,7 +489,7 @@
         changePasswordBtn.textContent = "Changing...";
 
         try {
-            const response = await fetch("/api/users/me/password", {
+            const response = await fetch("/api/v1/users/me/password", {
                 method: "PATCH",
                 headers: {
                     "Content-Type": "application/json",

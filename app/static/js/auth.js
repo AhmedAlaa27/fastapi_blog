@@ -18,7 +18,7 @@ export async function getCurrentUser() {
 
     fetchPromise = (async () => {
         try {
-            const response = await fetch("/api/users/me", {
+            const response = await fetch("/api/v1/users/me", {
                 headers: {
                     Authorization: `Bearer ${token}`,
                 },
@@ -47,7 +47,7 @@ export async function logout() {
     const refreshToken = localStorage.getItem("refresh_token");
     if (refreshToken) {
         try {
-            await fetch("/api/users/logout", {
+            await fetch("/api/v1/users/logout", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ refresh_token: refreshToken }),

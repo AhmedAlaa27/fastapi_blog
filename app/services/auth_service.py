@@ -1,6 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
-from fastapi import BackgroundTasks, HTTPException, status
+from fastapi import BackgroundTasks
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token as google_id_token
 from sqlalchemy import delete as sql_delete
@@ -17,6 +17,8 @@ from app.core.security import (
     verify_password,
     verify_refresh_token,
 )
+from app.exceptions.auth import EmailNotVerifiedError, InvalidCredentialsError, InvalidTokenError
+from app.exceptions.base import AlreadyExistsError, AppException, BadRequestError, UnauthorizedError
 from app.models import EmailVerificationToken, PasswordResetToken, RefreshToken, User
 from app.models.role import Role
 from app.repositories.user_repository import UserRepository
@@ -31,10 +33,7 @@ async def _get_role_by_name(db: AsyncSession, name: str) -> Role:
     result = await db.execute(select(Role).where(Role.name == name))
     role = result.scalars().first()
     if not role:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Role '{name}' is not configured",
-        )
+        raise AppException(f"Role '{name}' is not configured", status_code=500)
     return role
 
 
@@ -83,15 +82,9 @@ async def register(
     )
     if existing_user:
         if existing_user.username == data.username:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Username already exists",
-            )
+            raise AlreadyExistsError("Username already exists")
         if existing_user.email == data.email:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Email already exists",
-            )
+            raise AlreadyExistsError("Email already exists")
 
     author_role = await _get_role_by_name(db, "author")
 
@@ -135,24 +128,13 @@ async def login(db: AsyncSession, email: str, password: str) -> Token:
     # Don't reveal which one failed, or whether the account is Google-only
     # (security best practice)
     if not user or user.password_hash is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        raise InvalidCredentialsError()
 
     if not verify_password(password, user.password_hash):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        raise InvalidCredentialsError()
 
     if not user.email_verified:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Please verify your email before logging in.",
-        )
+        raise EmailNotVerifiedError()
 
     return await _issue_token_pair(db, user)
 
@@ -160,10 +142,7 @@ async def login(db: AsyncSession, email: str, password: str) -> Token:
 async def refresh(db: AsyncSession, refresh_token: str) -> Token:
     user_id = verify_refresh_token(refresh_token)
     if user_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired refresh token",
-        )
+        raise InvalidTokenError("Invalid or expired refresh token")
 
     token_hash = hash_reset_token(refresh_token)
     result = await db.execute(
@@ -172,31 +151,21 @@ async def refresh(db: AsyncSession, refresh_token: str) -> Token:
     stored_token = result.scalars().first()
 
     if not stored_token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired refresh token",
-        )
+        raise InvalidTokenError("Invalid or expired refresh token")
 
     if stored_token.revoked:
         # Reuse of an already-rotated/revoked refresh token: treat as compromised.
         await _revoke_all_refresh_tokens(db, stored_token.user_id)
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Refresh token reuse detected, all sessions revoked. Please log in again.",
+        raise InvalidTokenError(
+            "Refresh token reuse detected, all sessions revoked. Please log in again."
         )
 
     if stored_token.expires_at < datetime.now(UTC):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired refresh token",
-        )
+        raise InvalidTokenError("Invalid or expired refresh token")
 
     user = await user_repository.get_by_id(db, stored_token.user_id)
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired refresh token",
-        )
+        raise InvalidTokenError("Invalid or expired refresh token")
 
     stored_token.revoked = True
 
@@ -219,7 +188,7 @@ async def refresh(db: AsyncSession, refresh_token: str) -> Token:
     )
 
 
-async def logout(db: AsyncSession, refresh_token: str) -> None:
+async def logout(db: AsyncSession, refresh_token: str) -> int | None:
     token_hash = hash_reset_token(refresh_token)
     result = await db.execute(
         select(RefreshToken).where(RefreshToken.token_hash == token_hash),
@@ -229,9 +198,11 @@ async def logout(db: AsyncSession, refresh_token: str) -> None:
     if stored_token and not stored_token.revoked:
         stored_token.revoked = True
         await db.commit()
+        return stored_token.user_id
+    return None
 
 
-async def verify_email(db: AsyncSession, token: str) -> None:
+async def verify_email(db: AsyncSession, token: str) -> User:
     token_hash = hash_reset_token(token)
     result = await db.execute(
         select(EmailVerificationToken).where(
@@ -241,25 +212,16 @@ async def verify_email(db: AsyncSession, token: str) -> None:
     verification_token = result.scalars().first()
 
     if not verification_token:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired verification token",
-        )
+        raise BadRequestError("Invalid or expired verification token")
 
     if verification_token.expires_at < datetime.now(UTC):
         await db.delete(verification_token)
         await db.commit()
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired verification token",
-        )
+        raise BadRequestError("Invalid or expired verification token")
 
     user = await user_repository.get_by_id(db, verification_token.user_id)
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired verification token",
-        )
+        raise BadRequestError("Invalid or expired verification token")
 
     user.email_verified = True
 
@@ -270,6 +232,8 @@ async def verify_email(db: AsyncSession, token: str) -> None:
     )
     await db.commit()
 
+    return user
+
 
 async def google_login(db: AsyncSession, id_token_str: str) -> Token:
     try:
@@ -277,10 +241,7 @@ async def google_login(db: AsyncSession, id_token_str: str) -> Token:
             id_token_str, google_requests.Request(), settings.google_client_id
         )
     except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid Google token",
-        )
+        raise UnauthorizedError("Invalid Google token")
 
     sub = payload["sub"]
     email = payload["email"].lower()
@@ -346,7 +307,7 @@ async def forgot_password(
         )
 
 
-async def reset_password(db: AsyncSession, token: str, new_password: str) -> None:
+async def reset_password(db: AsyncSession, token: str, new_password: str) -> User:
     token_hash = hash_reset_token(token)
 
     result = await db.execute(
@@ -357,26 +318,17 @@ async def reset_password(db: AsyncSession, token: str, new_password: str) -> Non
     reset_token = result.scalars().first()
 
     if not reset_token:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired reset token",
-        )
+        raise BadRequestError("Invalid or expired reset token")
 
     if reset_token.expires_at < datetime.now(UTC):
         await db.delete(reset_token)
         await db.commit()
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired reset token",
-        )
+        raise BadRequestError("Invalid or expired reset token")
 
     user = await user_repository.get_by_id(db, reset_token.user_id)
 
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired reset token",
-        )
+        raise BadRequestError("Invalid or expired reset token")
 
     user.password_hash = hash_password(new_password)
 
@@ -390,6 +342,8 @@ async def reset_password(db: AsyncSession, token: str, new_password: str) -> Non
 
     await _revoke_all_refresh_tokens(db, user.id)
 
+    return user
+
 
 async def change_password(
     db: AsyncSession, current_user: User, current_password: str, new_password: str
@@ -397,10 +351,7 @@ async def change_password(
     if current_user.password_hash is None or not verify_password(
         current_password, current_user.password_hash
     ):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Current password is incorrect",
-        )
+        raise BadRequestError("Current password is incorrect")
 
     current_user.password_hash = hash_password(new_password)
 

@@ -1,8 +1,10 @@
 from datetime import datetime
 
-from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.exceptions.base import BadRequestError, PermissionDeniedError
+from app.exceptions.posts import PostNotFoundError
+from app.exceptions.users import UserNotFoundError
 from app.models import Post, User
 from app.repositories.post_repository import PostRepository
 from app.repositories.user_repository import UserRepository
@@ -24,10 +26,9 @@ async def list_posts(
 ) -> PaginatedPostsResponse:
     field_name = sort.lstrip("-")
     if field_name not in PostRepository.SORT_FIELDS:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid sort field '{field_name}'. Valid options: "
-            f"{', '.join(PostRepository.SORT_FIELDS)}",
+        raise BadRequestError(
+            f"Invalid sort field '{field_name}'. Valid options: "
+            f"{', '.join(PostRepository.SORT_FIELDS)}"
         )
 
     search = search.strip() if search else None
@@ -58,10 +59,7 @@ async def list_user_posts(
 ) -> PaginatedPostsResponse:
     user = await user_repository.get_by_id(db, user_id)
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found",
-        )
+        raise UserNotFoundError()
 
     total = await post_repository.count_by_user(db, user_id)
     posts = await post_repository.list_by_user_paginated(db, user_id, skip, limit)
@@ -79,9 +77,7 @@ async def list_user_posts(
 async def get_post(db: AsyncSession, post_id: int) -> Post:
     post = await post_repository.get_by_id(db, post_id)
     if not post:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Post not found"
-        )
+        raise PostNotFoundError()
     return post
 
 
@@ -103,18 +99,13 @@ def _authorize_post_mutation(current_user: User, post: Post, permission: str) ->
         p.name for role in current_user.roles for p in role.permissions
     }
     if not is_owner and not has_override:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to perform this action on this post",
-        )
+        raise PermissionDeniedError("Not authorized to perform this action on this post")
 
 
 async def _get_owned_post(db: AsyncSession, post_id: int, current_user: User) -> Post:
     post = await post_repository.get_by_id(db, post_id)
     if not post:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Post not found"
-        )
+        raise PostNotFoundError()
 
     _authorize_post_mutation(current_user, post, "posts:update")
     return post
@@ -151,9 +142,7 @@ async def update_post_partial(
 async def delete_post(db: AsyncSession, post_id: int, current_user: User) -> None:
     post = await post_repository.get_by_id(db, post_id)
     if not post:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Post not found"
-        )
+        raise PostNotFoundError()
 
     _authorize_post_mutation(current_user, post, "posts:delete")
 

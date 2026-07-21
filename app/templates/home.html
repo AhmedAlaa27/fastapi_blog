@@ -74,7 +74,7 @@
     let errorOccurred = false;
 
     try {
-        const response = await fetch(`/api/posts?skip=${currentOffset}&limit=${limit}`);
+        const response = await fetch(`/api/v1/posts?skip=${currentOffset}&limit=${limit}`);
 
         if (!response.ok) {
             throw new Error('Failed to fetch posts');

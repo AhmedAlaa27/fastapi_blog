@@ -71,30 +71,30 @@ async def posts(db_session: AsyncSession, author: User, other_author: User) -> l
 
 class TestSearch:
     async def test_search_title(self, client: AsyncClient, posts):
-        response = await client.get("/api/posts", params={"search": "FastAPI"})
+        response = await client.get("/api/v1/posts", params={"search": "FastAPI"})
         assert response.status_code == 200
         data = response.json()
         assert data["total"] == 1
         assert data["posts"][0]["title"] == "Intro to FastAPI"
 
     async def test_search_content(self, client: AsyncClient, posts):
-        response = await client.get("/api/posts", params={"search": "jwt"})
+        response = await client.get("/api/v1/posts", params={"search": "jwt"})
         assert response.status_code == 200
         assert response.json()["total"] == 1
 
     async def test_search_author_username(self, client: AsyncClient, posts):
-        response = await client.get("/api/posts", params={"search": "bob"})
+        response = await client.get("/api/v1/posts", params={"search": "bob"})
         assert response.status_code == 200
         data = response.json()
         assert data["total"] == 1
         assert data["posts"][0]["author"]["username"] == "bob"
 
     async def test_search_case_insensitive(self, client: AsyncClient, posts):
-        response = await client.get("/api/posts", params={"search": "fastapi"})
+        response = await client.get("/api/v1/posts", params={"search": "fastapi"})
         assert response.json()["total"] == 1
 
     async def test_search_no_match(self, client: AsyncClient, posts):
-        response = await client.get("/api/posts", params={"search": "nonexistent"})
+        response = await client.get("/api/v1/posts", params={"search": "nonexistent"})
         data = response.json()
         assert data["total"] == 0
         assert data["posts"] == []
@@ -102,25 +102,25 @@ class TestSearch:
 
 class TestFilter:
     async def test_filter_by_author(self, client: AsyncClient, posts, author: User):
-        response = await client.get("/api/posts", params={"author": author.id})
+        response = await client.get("/api/v1/posts", params={"author": author.id})
         data = response.json()
         assert data["total"] == 2
         assert all(p["user_id"] == author.id for p in data["posts"])
 
     async def test_filter_by_nonexistent_author(self, client: AsyncClient, posts):
-        response = await client.get("/api/posts", params={"author": 999999})
+        response = await client.get("/api/v1/posts", params={"author": 999999})
         assert response.json()["total"] == 0
 
     async def test_filter_created_after(self, client: AsyncClient, posts):
         cutoff = (datetime.now(UTC) - timedelta(days=2)).isoformat()
-        response = await client.get("/api/posts", params={"created_after": cutoff})
+        response = await client.get("/api/v1/posts", params={"created_after": cutoff})
         data = response.json()
         assert data["total"] == 1
         assert data["posts"][0]["title"] == "Pydantic Guide"
 
     async def test_filter_created_before(self, client: AsyncClient, posts):
         cutoff = (datetime.now(UTC) - timedelta(days=2)).isoformat()
-        response = await client.get("/api/posts", params={"created_before": cutoff})
+        response = await client.get("/api/v1/posts", params={"created_before": cutoff})
         data = response.json()
         assert data["total"] == 2
 
@@ -128,7 +128,7 @@ class TestFilter:
         after = (datetime.now(UTC) - timedelta(days=4)).isoformat()
         before = (datetime.now(UTC) - timedelta(days=2)).isoformat()
         response = await client.get(
-            "/api/posts", params={"created_after": after, "created_before": before}
+            "/api/v1/posts", params={"created_after": after, "created_before": before}
         )
         data = response.json()
         assert data["total"] == 1
@@ -136,7 +136,7 @@ class TestFilter:
 
     async def test_combined_author_and_search(self, client: AsyncClient, posts, author: User):
         response = await client.get(
-            "/api/posts", params={"author": author.id, "search": "Tips"}
+            "/api/v1/posts", params={"author": author.id, "search": "Tips"}
         )
         data = response.json()
         assert data["total"] == 1
@@ -145,47 +145,47 @@ class TestFilter:
 
 class TestSort:
     async def test_default_sort_is_newest_first(self, client: AsyncClient, posts):
-        response = await client.get("/api/posts")
+        response = await client.get("/api/v1/posts")
         titles = [p["title"] for p in response.json()["posts"]]
         assert titles == ["Pydantic Guide", "SQLAlchemy Tips", "Intro to FastAPI"]
 
     async def test_sort_date_posted_ascending(self, client: AsyncClient, posts):
-        response = await client.get("/api/posts", params={"sort": "date_posted"})
+        response = await client.get("/api/v1/posts", params={"sort": "date_posted"})
         titles = [p["title"] for p in response.json()["posts"]]
         assert titles == ["Intro to FastAPI", "SQLAlchemy Tips", "Pydantic Guide"]
 
     async def test_sort_title_ascending(self, client: AsyncClient, posts):
-        response = await client.get("/api/posts", params={"sort": "title"})
+        response = await client.get("/api/v1/posts", params={"sort": "title"})
         titles = [p["title"] for p in response.json()["posts"]]
         assert titles == sorted(titles)
 
     async def test_sort_title_descending(self, client: AsyncClient, posts):
-        response = await client.get("/api/posts", params={"sort": "-title"})
+        response = await client.get("/api/v1/posts", params={"sort": "-title"})
         titles = [p["title"] for p in response.json()["posts"]]
         assert titles == sorted(titles, reverse=True)
 
     async def test_invalid_sort_field_returns_400(self, client: AsyncClient, posts):
-        response = await client.get("/api/posts", params={"sort": "bogus"})
+        response = await client.get("/api/v1/posts", params={"sort": "bogus"})
         assert response.status_code == 400
         assert "Invalid sort field" in response.json()["detail"]
 
 
 class TestPagination:
     async def test_skip_beyond_total_returns_empty(self, client: AsyncClient, posts):
-        response = await client.get("/api/posts", params={"skip": 1000, "limit": 10})
+        response = await client.get("/api/v1/posts", params={"skip": 1000, "limit": 10})
         data = response.json()
         assert data["posts"] == []
         assert data["has_more"] is False
 
     async def test_limit_boundary(self, client: AsyncClient, posts):
-        response = await client.get("/api/posts", params={"skip": 0, "limit": 1})
+        response = await client.get("/api/v1/posts", params={"skip": 0, "limit": 1})
         data = response.json()
         assert len(data["posts"]) == 1
         assert data["has_more"] is True
 
     async def test_pagination_with_filter(self, client: AsyncClient, posts, author: User):
         response = await client.get(
-            "/api/posts", params={"author": author.id, "skip": 0, "limit": 1}
+            "/api/v1/posts", params={"author": author.id, "skip": 0, "limit": 1}
         )
         data = response.json()
         assert data["total"] == 2

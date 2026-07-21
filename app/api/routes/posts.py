@@ -1,14 +1,14 @@
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import CurrentUser, require_permission
 from app.core.config import settings
 from app.db.session import get_db
 from app.schemas.post import PaginatedPostsResponse, PostCreate, PostResponse, PostUpdate
-from app.services import post_service
+from app.services import audit_service, post_service
 
 router = APIRouter()
 
@@ -58,11 +58,21 @@ async def get_posts(
     dependencies=[Depends(require_permission("posts:create"))],
 )
 async def create_post(
+    request: Request,
     post: PostCreate,
     current_user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    return await post_service.create_post(db, post, current_user)
+    new_post = await post_service.create_post(db, post, current_user)
+    await audit_service.log_event(
+        db,
+        user_id=current_user.id,
+        action="create",
+        resource="post",
+        resource_id=new_post.id,
+        request=request,
+    )
+    return new_post
 
 
 @router.get("/{post_id}", response_model=PostResponse)
@@ -72,28 +82,57 @@ async def get_post(post_id: int, db: Annotated[AsyncSession, Depends(get_db)]):
 
 @router.put("/{post_id}", response_model=PostResponse)
 async def update_post_full(
+    request: Request,
     post_id: int,
     post_data: PostCreate,
     current_user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    return await post_service.update_post_full(db, post_id, post_data, current_user)
+    post = await post_service.update_post_full(db, post_id, post_data, current_user)
+    await audit_service.log_event(
+        db,
+        user_id=current_user.id,
+        action="update",
+        resource="post",
+        resource_id=post_id,
+        request=request,
+    )
+    return post
 
 
 @router.patch("/{post_id}", response_model=PostResponse)
 async def update_post_partial(
+    request: Request,
     post_id: int,
     post_data: PostUpdate,
     current_user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    return await post_service.update_post_partial(db, post_id, post_data, current_user)
+    post = await post_service.update_post_partial(db, post_id, post_data, current_user)
+    await audit_service.log_event(
+        db,
+        user_id=current_user.id,
+        action="update",
+        resource="post",
+        resource_id=post_id,
+        request=request,
+    )
+    return post
 
 
 @router.delete("/{post_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_post(
+    request: Request,
     post_id: int,
     current_user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     await post_service.delete_post(db, post_id, current_user)
+    await audit_service.log_event(
+        db,
+        user_id=current_user.id,
+        action="delete",
+        resource="post",
+        resource_id=post_id,
+        request=request,
+    )

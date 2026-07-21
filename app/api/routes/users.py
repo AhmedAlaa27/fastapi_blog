@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, UploadFile, status
+from fastapi import APIRouter, Depends, Query, Request, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import CurrentUser
@@ -8,7 +8,7 @@ from app.core.config import settings
 from app.db.session import get_db
 from app.schemas.post import PaginatedPostsResponse
 from app.schemas.user import UserPrivate, UserPublic, UserUpdate
-from app.services import post_service, user_service
+from app.services import audit_service, post_service, user_service
 
 router = APIRouter()
 
@@ -30,11 +30,20 @@ async def update_user(
 
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_user(
+    request: Request,
     user_id: int,
     current_user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     await user_service.delete_user(db, user_id, current_user)
+    await audit_service.log_event(
+        db,
+        user_id=current_user.id,
+        action="delete",
+        resource="user",
+        resource_id=user_id,
+        request=request,
+    )
 
 
 @router.get("/{user_id}/posts", response_model=PaginatedPostsResponse)

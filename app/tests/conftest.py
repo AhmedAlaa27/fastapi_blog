@@ -143,7 +143,7 @@ async def create_test_user(
     password: str = "testpassword123",
 ) -> dict:
     response = await client.post(
-        "/api/users",
+        "/api/v1/users",
         json={
             "username": username,
             "email": email,
@@ -168,7 +168,7 @@ async def login_user(
     password: str = "testpassword123",
 ) -> str:
     response = await client.post(
-        "/api/users/token",
+        "/api/v1/users/token",
         data={
             "username": email,
             "password": password,

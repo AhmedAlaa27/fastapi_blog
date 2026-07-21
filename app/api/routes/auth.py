@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import CurrentUser
 from app.core.rate_limit import limiter
+from app.core.security import verify_access_token
 from app.db.session import get_db
 from app.schemas.auth import (
     ChangePasswordRequest,
@@ -18,7 +19,7 @@ from app.schemas.auth import (
     VerifyEmailRequest,
 )
 from app.schemas.user import UserCreate, UserPrivate
-from app.services import auth_service
+from app.services import audit_service, auth_service
 
 router = APIRouter()
 
@@ -35,7 +36,16 @@ async def create_user(
     background_tasks: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    return await auth_service.register(db, user, background_tasks)
+    new_user = await auth_service.register(db, user, background_tasks)
+    await audit_service.log_event(
+        db,
+        user_id=new_user.id,
+        action="register",
+        resource="user",
+        resource_id=new_user.id,
+        request=request,
+    )
+    return new_user
 
 
 @router.post("/token", response_model=Token)
@@ -46,7 +56,17 @@ async def login_for_access_token(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     # Note: OAuth2PasswordRequestForm uses "username" field, but we treat it as email
-    return await auth_service.login(db, form_data.username, form_data.password)
+    token = await auth_service.login(db, form_data.username, form_data.password)
+    user_id = verify_access_token(token.access_token)
+    await audit_service.log_event(
+        db,
+        user_id=int(user_id) if user_id else None,
+        action="login",
+        resource="user",
+        resource_id=int(user_id) if user_id else None,
+        request=request,
+    )
+    return token
 
 
 @router.post("/refresh", response_model=Token)
@@ -61,10 +81,19 @@ async def refresh_token(
 
 @router.post("/logout", status_code=status.HTTP_200_OK)
 async def logout(
+    request: Request,
     request_data: LogoutRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    await auth_service.logout(db, request_data.refresh_token)
+    user_id = await auth_service.logout(db, request_data.refresh_token)
+    await audit_service.log_event(
+        db,
+        user_id=user_id,
+        action="logout",
+        resource="user",
+        resource_id=user_id,
+        request=request,
+    )
     return {"message": "Logged out successfully"}
 
 
@@ -84,10 +113,19 @@ async def get_current_user_info(current_user: CurrentUser):
 
 @router.post("/verify-email", status_code=status.HTTP_200_OK)
 async def verify_email(
+    request: Request,
     request_data: VerifyEmailRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    await auth_service.verify_email(db, request_data.token)
+    user = await auth_service.verify_email(db, request_data.token)
+    await audit_service.log_event(
+        db,
+        user_id=user.id,
+        action="email_verified",
+        resource="user",
+        resource_id=user.id,
+        request=request,
+    )
     return {"message": "Email verified successfully. You can now log in."}
 
 
@@ -107,10 +145,21 @@ async def forgot_password(
 
 @router.post("/reset-password", status_code=status.HTTP_200_OK)
 async def reset_password(
+    request: Request,
     request_data: ResetPasswordRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    await auth_service.reset_password(db, request_data.token, request_data.new_password)
+    user = await auth_service.reset_password(
+        db, request_data.token, request_data.new_password
+    )
+    await audit_service.log_event(
+        db,
+        user_id=user.id,
+        action="password_reset",
+        resource="user",
+        resource_id=user.id,
+        request=request,
+    )
     return {
         "message": "Password reset successfully. You can now log in with your new password."
     }
