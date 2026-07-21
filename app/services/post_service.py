@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,9 +12,36 @@ post_repository = PostRepository()
 user_repository = UserRepository()
 
 
-async def list_posts(db: AsyncSession, skip: int, limit: int) -> PaginatedPostsResponse:
-    total = await post_repository.count_all(db)
-    posts = await post_repository.list_paginated(db, skip, limit)
+async def list_posts(
+    db: AsyncSession,
+    skip: int,
+    limit: int,
+    search: str | None = None,
+    author: int | None = None,
+    created_after: datetime | None = None,
+    created_before: datetime | None = None,
+    sort: str = "-date_posted",
+) -> PaginatedPostsResponse:
+    field_name = sort.lstrip("-")
+    if field_name not in PostRepository.SORT_FIELDS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid sort field '{field_name}'. Valid options: "
+            f"{', '.join(PostRepository.SORT_FIELDS)}",
+        )
+
+    search = search.strip() if search else None
+
+    posts, total = await post_repository.search_posts(
+        db,
+        search=search,
+        author=author,
+        created_after=created_after,
+        created_before=created_before,
+        sort=sort,
+        skip=skip,
+        limit=limit,
+    )
     has_more = skip + len(posts) < total
 
     return PaginatedPostsResponse(

@@ -1,13 +1,21 @@
-from sqlalchemy import func, select
+from datetime import datetime
+
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models import Post
+from app.models import Post, User
 from app.repositories.base import BaseRepository
 
 
 class PostRepository(BaseRepository[Post]):
     model = Post
+
+    SORT_FIELDS = {
+        "date_posted": Post.date_posted,
+        "title": Post.title,
+        "likes": Post.likes,
+    }
 
     async def get_by_id(self, db: AsyncSession, id_: int) -> Post | None:
         result = await db.execute(
@@ -49,6 +57,50 @@ class PostRepository(BaseRepository[Post]):
             .limit(limit)
         )
         return list(result.scalars().all())
+
+    async def search_posts(
+        self,
+        db: AsyncSession,
+        search: str | None = None,
+        author: int | None = None,
+        created_after: datetime | None = None,
+        created_before: datetime | None = None,
+        sort: str = "-date_posted",
+        skip: int = 0,
+        limit: int = 10,
+    ) -> tuple[list[Post], int]:
+        conditions = []
+        if search:
+            pattern = f"%{search}%"
+            conditions.append(
+                or_(
+                    Post.title.ilike(pattern),
+                    Post.content.ilike(pattern),
+                    Post.author.has(User.username.ilike(pattern)),
+                )
+            )
+        if author is not None:
+            conditions.append(Post.user_id == author)
+        if created_after is not None:
+            conditions.append(Post.date_posted >= created_after)
+        if created_before is not None:
+            conditions.append(Post.date_posted <= created_before)
+
+        count_stmt = select(func.count()).select_from(Post)
+        stmt = select(Post).options(selectinload(Post.author))
+        for condition in conditions:
+            count_stmt = count_stmt.where(condition)
+            stmt = stmt.where(condition)
+
+        total = (await db.execute(count_stmt)).scalar() or 0
+
+        field_name = sort.lstrip("-")
+        column = self.SORT_FIELDS[field_name]
+        stmt = stmt.order_by(column.desc() if sort.startswith("-") else column.asc())
+        stmt = stmt.offset(skip).limit(limit)
+
+        result = await db.execute(stmt)
+        return list(result.scalars().all()), total
 
     def create(self, db: AsyncSession, post: Post) -> Post:
         db.add(post)

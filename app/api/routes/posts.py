@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
@@ -15,10 +16,39 @@ router = APIRouter()
 @router.get("", response_model=PaginatedPostsResponse)
 async def get_posts(
     db: Annotated[AsyncSession, Depends(get_db)],
-    skip: Annotated[int, Query(ge=0)] = 0,
-    limit: Annotated[int, Query(ge=1, le=100)] = settings.posts_per_page,
+    skip: Annotated[int, Query(ge=0, description="Number of posts to skip")] = 0,
+    limit: Annotated[
+        int, Query(ge=1, le=100, description="Items per page")
+    ] = settings.posts_per_page,
+    search: Annotated[
+        str | None, Query(description="Search title, content, and author username")
+    ] = None,
+    author: Annotated[
+        int | None, Query(ge=1, description="Filter by author user_id")
+    ] = None,
+    created_after: Annotated[
+        datetime | None,
+        Query(description="Only posts created after this datetime (ISO 8601)"),
+    ] = None,
+    created_before: Annotated[
+        datetime | None,
+        Query(description="Only posts created before this datetime (ISO 8601)"),
+    ] = None,
+    sort: Annotated[
+        str,
+        Query(description="Sort field: date_posted, title, likes; prefix '-' for descending"),
+    ] = "-date_posted",
 ):
-    return await post_service.list_posts(db, skip, limit)
+    return await post_service.list_posts(
+        db,
+        skip,
+        limit,
+        search=search,
+        author=author,
+        created_after=created_after,
+        created_before=created_before,
+        sort=sort,
+    )
 
 
 @router.post(
