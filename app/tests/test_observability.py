@@ -32,6 +32,11 @@ async def test_response_has_process_time_header(client: AsyncClient):
     assert "x-process-time-ms" in response.headers
 
 
+async def test_process_time_header_is_numeric(client: AsyncClient):
+    response = await client.get("/health")
+    assert float(response.headers["x-process-time-ms"]) >= 0
+
+
 # --- Structured JSON logging ---
 
 

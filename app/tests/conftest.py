@@ -28,12 +28,17 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import NullPool
 
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
+from app.core.config import settings
 from app.db.base import Base
 from app.db.session import get_db
+from app.infrastructure.cache.redis_cache_service import RedisCacheService
 from app.main import app
 from app.models import User
 from app.models.role import Permission, Role
+from app.storage.local_storage import LocalStorage
+import app.storage.local_storage as local_storage_module
 
 pytest_plugins = ["anyio"]
 
@@ -124,6 +129,11 @@ async def mocked_redis(monkeypatch):
         return fake
 
     monkeypatch.setattr("app.infrastructure.cache.client.get_redis_client", _get_fake_client)
+    # redis_cache_service.py does `from ... import get_redis_client`, binding its own
+    # module-level name at import time; patching client.py alone doesn't reach it.
+    monkeypatch.setattr(
+        "app.infrastructure.cache.redis_cache_service.get_redis_client", _get_fake_client
+    )
     yield fake
     await fake.aclose()
 
@@ -133,7 +143,24 @@ async def client(
     db_session: AsyncSession,
     mocked_aws,
     mocked_redis,
+    monkeypatch,
 ) -> AsyncGenerator[AsyncClient]:
+    # slowapi's Limiter connects directly to settings.redis_url (real Redis), independent
+    # of the mocked_redis patch above. Flush it so per-test rate limits (5/min login,
+    # 5/hour register, etc.) don't accumulate real state across test runs.
+    import redis.asyncio as real_redis
+
+    rate_limit_client = real_redis.from_url(settings.redis_url)
+    await rate_limit_client.flushdb()
+    await rate_limit_client.aclose()
+
+    # register()/forgot_password() queue a real email via BackgroundTasks, which run
+    # inline under ASGITransport. Default to a no-op so tests don't hit the real SMTP
+    # server configured in .env; tests exercising SMTP failure override this.
+    async def _noop_send_email(*args, **kwargs) -> None:
+        return None
+
+    monkeypatch.setattr("aiosmtplib.send", _noop_send_email)
 
     async def override_get_db():
         yield db_session
@@ -147,6 +174,74 @@ async def client(
         yield ac
 
     app.dependency_overrides.clear()
+
+
+@pytest.fixture
+async def redis_client(mocked_redis):
+    return mocked_redis
+
+
+@pytest.fixture
+def cache_service(mocked_redis) -> RedisCacheService:
+    return RedisCacheService()
+
+
+@pytest.fixture
+def storage_service(tmp_path, monkeypatch) -> LocalStorage:
+    monkeypatch.setattr(local_storage_module, "PROFILE_PICS_DIR", tmp_path)
+    return LocalStorage()
+
+
+@pytest.fixture
+async def anonymous_client(client: AsyncClient) -> AsyncClient:
+    return client
+
+
+@pytest.fixture
+async def author_client(
+    client: AsyncClient, db_session: AsyncSession
+) -> AsyncGenerator[AsyncClient]:
+    # A separate AsyncClient instance (not the shared `client`) so its Authorization
+    # header doesn't collide with sibling fixtures like admin_client in the same test;
+    # `client`'s dependency_overrides on `app` stay active for both.
+    await create_test_user(
+        client, db_session, "author_user", "author_user@example.com", "testpassword123"
+    )
+    token = await login_user(client, "author_user@example.com", "testpassword123")
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+        headers=auth_header(token),
+    ) as ac:
+        yield ac
+
+
+@pytest.fixture
+async def admin_client(
+    client: AsyncClient, db_session: AsyncSession
+) -> AsyncGenerator[AsyncClient]:
+    await create_test_user(
+        client, db_session, "admin_user", "admin_user@example.com", "testpassword123"
+    )
+    # Eager-load roles before assigning a new collection: SQLAlchemy needs to read the
+    # existing collection to diff it, and a lazy load can't run in this async context.
+    result = await db_session.execute(
+        select(User)
+        .options(selectinload(User.roles))
+        .where(User.email == "admin_user@example.com")
+    )
+    user = result.scalars().one()
+    role_result = await db_session.execute(select(Role).where(Role.name == "admin"))
+    user.roles = [role_result.scalars().one()]
+    await db_session.commit()
+
+    token = await login_user(client, "admin_user@example.com", "testpassword123")
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+        headers=auth_header(token),
+    ) as ac:
+        yield ac
 
 
 async def create_test_user(
