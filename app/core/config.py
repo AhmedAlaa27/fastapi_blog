@@ -10,6 +10,9 @@ class Settings(BaseSettings):
 
     database_url: str
 
+    redis_url: str = "redis://localhost:6379/0"
+    cache_default_ttl: int = 300
+
     secret_key: SecretStr
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 15

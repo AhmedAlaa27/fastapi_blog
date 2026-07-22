@@ -20,6 +20,7 @@ os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
 
 
 import boto3
+import fakeredis.aioredis
 import pytest
 from httpx import ASGITransport, AsyncClient
 from moto import mock_aws
@@ -116,9 +117,22 @@ def mocked_aws():
 
 
 @pytest.fixture
+async def mocked_redis(monkeypatch):
+    fake = fakeredis.aioredis.FakeRedis(decode_responses=True)
+
+    async def _get_fake_client():
+        return fake
+
+    monkeypatch.setattr("app.infrastructure.cache.client.get_redis_client", _get_fake_client)
+    yield fake
+    await fake.aclose()
+
+
+@pytest.fixture
 async def client(
     db_session: AsyncSession,
     mocked_aws,
+    mocked_redis,
 ) -> AsyncGenerator[AsyncClient]:
 
     async def override_get_db():

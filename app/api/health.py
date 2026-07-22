@@ -1,3 +1,4 @@
+import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
@@ -6,6 +7,10 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
+from app.dependencies.cache import get_cache
+from app.services.cache_service import CacheService
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -16,7 +21,10 @@ async def health() -> dict:
 
 
 @router.get("/ready")
-async def ready(db: Annotated[AsyncSession, Depends(get_db)]):
+async def ready(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    cache: Annotated[CacheService, Depends(get_cache)],
+):
     try:
         await db.execute(text("SELECT 1"))
     except Exception:
@@ -24,6 +32,10 @@ async def ready(db: Annotated[AsyncSession, Depends(get_db)]):
             status_code=503,
             content={"status": "not_ready", "detail": "database unavailable"},
         )
+
+    if not await cache.exists("__health_check__"):
+        logger.warning("redis unavailable during readiness check")
+
     return {"status": "ready"}
 
 

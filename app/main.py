@@ -25,6 +25,7 @@ from app.core.rate_limit import limiter
 from app.db.session import engine, get_db
 from app.exceptions.base import AppException
 from app.exceptions.handlers import app_exception_handler
+from app.infrastructure.cache.client import close_redis_client
 from app.middleware.request_context import RequestContextMiddleware
 from app.services import post_service, user_service
 
@@ -36,6 +37,7 @@ async def lifespan(_app: FastAPI):
     setup_logging(settings.log_level)
     yield
     await engine.dispose()
+    await close_redis_client()
 
 
 app = FastAPI(lifespan=lifespan)

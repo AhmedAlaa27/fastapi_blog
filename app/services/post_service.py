@@ -2,16 +2,21 @@ from datetime import datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.exceptions.base import BadRequestError, PermissionDeniedError
 from app.exceptions.posts import PostNotFoundError
 from app.exceptions.users import UserNotFoundError
+from app.infrastructure.cache.keys import post_detail_key, post_list_key, post_list_pattern
+from app.infrastructure.cache.redis_cache_service import RedisCacheService
 from app.models import Post, User
 from app.repositories.post_repository import PostRepository
 from app.repositories.user_repository import UserRepository
 from app.schemas.post import PaginatedPostsResponse, PostCreate, PostResponse, PostUpdate
+from app.services.cache_service import CacheService
 
 post_repository = PostRepository()
 user_repository = UserRepository()
+cache_service: CacheService = RedisCacheService()
 
 
 async def list_posts(
@@ -24,6 +29,11 @@ async def list_posts(
     created_before: datetime | None = None,
     sort: str = "-date_posted",
 ) -> PaginatedPostsResponse:
+    cache_key = post_list_key(skip, limit, search, author, created_after, created_before, sort)
+    cached = await cache_service.get(cache_key)
+    if cached is not None:
+        return PaginatedPostsResponse.model_validate(cached)
+
     field_name = sort.lstrip("-")
     if field_name not in PostRepository.SORT_FIELDS:
         raise BadRequestError(
@@ -45,13 +55,15 @@ async def list_posts(
     )
     has_more = skip + len(posts) < total
 
-    return PaginatedPostsResponse(
+    response = PaginatedPostsResponse(
         posts=[PostResponse.model_validate(post) for post in posts],
         total=total,
         skip=skip,
         limit=limit,
         has_more=has_more,
     )
+    await cache_service.set(cache_key, response.model_dump(mode="json"), ttl=settings.cache_default_ttl)
+    return response
 
 
 async def list_user_posts(
@@ -74,11 +86,19 @@ async def list_user_posts(
     )
 
 
-async def get_post(db: AsyncSession, post_id: int) -> Post:
+async def get_post(db: AsyncSession, post_id: int) -> PostResponse:
+    cache_key = post_detail_key(post_id)
+    cached = await cache_service.get(cache_key)
+    if cached is not None:
+        return PostResponse.model_validate(cached)
+
     post = await post_repository.get_by_id(db, post_id)
     if not post:
         raise PostNotFoundError()
-    return post
+
+    response = PostResponse.model_validate(post)
+    await cache_service.set(cache_key, response.model_dump(mode="json"), ttl=settings.cache_default_ttl)
+    return response
 
 
 async def create_post(db: AsyncSession, data: PostCreate, current_user: User) -> Post:
@@ -90,6 +110,7 @@ async def create_post(db: AsyncSession, data: PostCreate, current_user: User) ->
     post_repository.create(db, new_post)
     await db.commit()
     await db.refresh(new_post, attribute_names=["author"])
+    await cache_service.delete_pattern(post_list_pattern())
     return new_post
 
 
@@ -122,6 +143,8 @@ async def update_post_full(
 
     await db.commit()
     await db.refresh(post, attribute_names=["author"])
+    await cache_service.delete(post_detail_key(post_id))
+    await cache_service.delete_pattern(post_list_pattern())
     return post
 
 
@@ -136,6 +159,8 @@ async def update_post_partial(
 
     await db.commit()
     await db.refresh(post, attribute_names=["author"])
+    await cache_service.delete(post_detail_key(post_id))
+    await cache_service.delete_pattern(post_list_pattern())
     return post
 
 
@@ -148,3 +173,5 @@ async def delete_post(db: AsyncSession, post_id: int, current_user: User) -> Non
 
     await post_repository.delete(db, post)
     await db.commit()
+    await cache_service.delete(post_detail_key(post_id))
+    await cache_service.delete_pattern(post_list_pattern())

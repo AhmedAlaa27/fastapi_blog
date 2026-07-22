@@ -9,6 +9,9 @@ LOG_RECORD_EXTRA_FIELDS = (
     "status_code",
     "duration_ms",
     "user_id",
+    "cache_key",
+    "cache_result",
+    "cache_pattern",
 )
 
 
