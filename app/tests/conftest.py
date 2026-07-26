@@ -40,8 +40,6 @@ from app.models.role import Permission, Role
 from app.storage.local_storage import LocalStorage
 import app.storage.local_storage as local_storage_module
 
-pytest_plugins = ["anyio"]
-
 PERMISSIONS = ["posts:create", "posts:update", "posts:delete"]
 ROLE_PERMISSIONS = {
     "admin": ["posts:create", "posts:update", "posts:delete"],
